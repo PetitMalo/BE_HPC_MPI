@@ -2,6 +2,7 @@
 #define SOLVER_H
 
 #include <mpi.h>
+#include <time.h>
 
 // Définition du problème local
 typedef struct {
@@ -42,4 +43,8 @@ void step(heat_problem * pb, double dt);
  * Affiche le résultat du problème.
  */
 void print_result(heat_problem * pb);
+
+
+/** Retourne la différence (en secondes) entre deux timespec */
+double get_delta(struct timespec begin, struct timespec end);
 #endif

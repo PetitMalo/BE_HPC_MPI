@@ -3,7 +3,16 @@
 #include <stdio.h>
 #include <string.h>
 
+
+/** Retourne la différence (en secondes) entre deux timespec */
+double get_delta(struct timespec begin, struct timespec end) {
+	return end.tv_sec - begin.tv_sec + (end.tv_nsec - begin.tv_nsec) * 1e-9;
+}
+
+
 void create_problem(int nx, int ny, double alpha, int NX, int NY, heat_problem * pb) {
+	struct timespec start, end;
+	clock_gettime(CLOCK_MONOTONIC, &start);
 	pb->nx = nx/NX + 2;
 	pb->ny = ny/NY + 2;
 	pb->dx = 1.0/(nx+1);
@@ -20,11 +29,14 @@ void create_problem(int nx, int ny, double alpha, int NX, int NY, heat_problem *
 	}
 	//pb->ycomm = ...;
 	//pb->ycomm_rank, pb->ycomm_size à renseigner
+	clock_gettime(CLOCK_MONOTONIC, &end);
+	printf("Temps passé dans create_problem: %f seconds\n", get_delta(start, end));
 }
 
 void free_problem(heat_problem * pb) {
 	free(pb->T);
 }
+
 
 void step(heat_problem * pb, double dt) {
 	int nx = pb->nx;
@@ -45,6 +57,8 @@ void step(heat_problem * pb, double dt) {
 }
 
 void print_result(heat_problem * pb) {
+	struct timespec start, end;
+	clock_gettime(CLOCK_MONOTONIC, &start);
 	int nx = pb->nx;
 	int ny = pb->ny;
 	for (int i = 0; i < ny; i++) {
@@ -53,4 +67,6 @@ void print_result(heat_problem * pb) {
 		}
 		printf("\n");
 	}
+	clock_gettime(CLOCK_MONOTONIC, &end);
+	printf("Temps passé dans print_result: %f seconds\n", get_delta(start, end));
 }
