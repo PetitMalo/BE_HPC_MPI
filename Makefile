@@ -1,5 +1,5 @@
 CC=mpicc
-CFLAGS=-Wall -Werror -std=gnu99 -fopenmp -Iinclude -g
+CFLAGS=-Wall -Werror -std=gnu99 -fopenmp -Iinclude -g -D_POSIX_C_SOURCE=200809L
 LDFLAGS=-fopenmp -lrt -lm
 
 solveur : main.o solver.o
