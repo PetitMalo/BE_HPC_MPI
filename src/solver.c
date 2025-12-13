@@ -38,23 +38,68 @@ void free_problem(heat_problem * pb) {
 }
 
 
-void step(heat_problem * pb, double dt) {
-	int nx = pb->nx;
-	int ny = pb->ny;
-	int size = nx * ny * sizeof(double);
-	double * oldT = malloc(size);
-	memcpy(oldT, pb->T, size);
+// void step(heat_problem * pb, double dt) {
+// 	int nx = pb->nx;
+// 	int ny = pb->ny;
+// 	int size = nx * ny * sizeof(double);
+// 	double * oldT = malloc(size);
+// 	memcpy(oldT, pb->T, size);
 
-	for (int i = 1; i < ny-1; i++) {
-		for (int j = 1; j < nx-1; j++) {
-			int index = i*nx + j;
-			double lapl_x = (oldT[index+1] - 2*oldT[index] + oldT[index-1])/(pb->dx*pb->dx);
-			double lapl_y = (oldT[index+nx] - 2*oldT[index] + oldT[index-nx])/(pb->dy*pb->dy);
-			pb->T[index] += pb->alpha * dt * (lapl_x + lapl_y);
-		}
-	}
-	free(oldT);
+// 	for (int i = 1; i < ny-1; i++) {
+// 		for (int j = 1; j < nx-1; j++) {
+// 			int index = i*nx + j;
+// 			double lapl_x = (oldT[index+1] - 2*oldT[index] + oldT[index-1])/(pb->dx*pb->dx);
+// 			double lapl_y = (oldT[index+nx] - 2*oldT[index] + oldT[index-nx])/(pb->dy*pb->dy);
+// 			pb->T[index] += pb->alpha * dt * (lapl_x + lapl_y);
+// 		}
+// 	}
+// 	free(oldT);
+// }
+
+
+void step(heat_problem *pb, double dt) {
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    int nx = pb->nx;
+    int ny = pb->ny;
+    int ny_local = ny / size;
+
+    // Allocation locale
+    double *oldT = malloc(nx * ny_local * sizeof(double));
+    memcpy(oldT, pb->T_local, nx * ny_local * sizeof(double));
+
+    // Halo exchange
+    if (rank > 0) {
+        MPI_Sendrecv(oldT, nx, MPI_DOUBLE, rank-1, 0,
+                     oldT - nx, nx, MPI_DOUBLE, rank-1, 0,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
+    if (rank < size-1) {
+        MPI_Sendrecv(oldT + (ny_local-1)*nx, nx, MPI_DOUBLE, rank+1, 0,
+                     oldT + ny_local*nx, nx, MPI_DOUBLE, rank+1, 0,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
+
+    // Calcul local
+    for (int i = 1; i < ny_local-1; i++) {
+        for (int j = 1; j < nx-1; j++) {
+            int index = i*nx + j;
+            double lapl_x = (oldT[index+1] - 2*oldT[index] + oldT[index-1])/(pb->dx*pb->dx);
+            double lapl_y = (oldT[index+nx] - 2*oldT[index] + oldT[index-nx])/(pb->dy*pb->dy);
+            pb->T_local[index] += pb->alpha * dt * (lapl_x + lapl_y);
+        }
+    }
+
+    free(oldT);
+
+    // Rapatriement des résultats
+    MPI_Gather(pb->T_local, nx*ny_local, MPI_DOUBLE,
+               pb->T, nx*ny_local, MPI_DOUBLE,
+               0, MPI_COMM_WORLD);
 }
+
 
 void print_result(heat_problem * pb) {
 	struct timespec start, end;
