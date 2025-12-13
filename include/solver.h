@@ -47,4 +47,7 @@ void print_result(heat_problem * pb);
 
 /** Retourne la différence (en secondes) entre deux timespec */
 double get_delta(struct timespec begin, struct timespec end);
+
+/** Calcule une itération en parallèle. */
+void step_parallel(heat_problem *pb, double dt);
 #endif
