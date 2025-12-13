@@ -37,6 +37,10 @@ int main(int argc, char * argv[]) {
 
 	for (int i = 0; i < niter; i++) {
 		step_parallel(&pb, dt); // Appel à la version parallèle
+		// On appelle print_mean tous les 100 itérations
+		if (i % 100 == 0){
+			print_mean(&pb, ny);
+		}
 	}
 
 	// ------------------ Rapatriement du champ global ------------------

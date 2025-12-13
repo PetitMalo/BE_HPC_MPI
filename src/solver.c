@@ -119,3 +119,48 @@ void print_result(heat_problem * pb) {
 	clock_gettime(CLOCK_MONOTONIC, &end);
 	// printf("Temps passé dans print_result: %f seconds\n", get_delta(start, end));
 }
+
+void print_mean(heat_problem *pb, int ny_global) {
+    int nx = pb->nx;
+    int ny_local = pb->ny - 2;
+
+    double *local_sum = calloc(nx, sizeof(double));
+    double *global_sum = NULL;
+
+    int world_rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+
+    // On s'assure que seul le rang 0 alloue le tableau global
+    if (world_rank == 0) {
+        global_sum = calloc(nx, sizeof(double));
+    }
+
+    // Somme locale (hors fantômes)
+    for (int i = 1; i <= ny_local; i++) {
+        for (int j = 0; j < nx; j++) {
+            local_sum[j] += pb->T[i * nx + j];
+        }
+    }
+
+    MPI_Reduce(
+        local_sum,
+        global_sum,
+        nx,
+        MPI_DOUBLE,
+        MPI_SUM,
+        0,
+        MPI_COMM_WORLD
+    );
+
+    // Affichage de la moyenne par le rang 0
+    if (world_rank == 0) {
+        for (int j = 0; j < nx; j++) {
+            printf("%6.4f ", global_sum[j] / ny_global);
+        }
+        printf("\n");
+        free(global_sum);
+    }
+
+    free(local_sum);
+}
+

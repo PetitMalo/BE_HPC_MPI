@@ -50,4 +50,6 @@ double get_delta(struct timespec begin, struct timespec end);
 
 /** Calcule une itération en parallèle. */
 void step_parallel(heat_problem *pb, double dt);
+
+void print_mean(heat_problem *pb, int ny_global);
 #endif
