@@ -4,20 +4,14 @@
 #include <time.h>
 #include <mpi.h>
 
-/** Retourne la différence (en secondes) entre deux timespec */
-double get_delta(struct timespec begin, struct timespec end) {
-	return end.tv_sec - begin.tv_sec + (end.tv_nsec - begin.tv_nsec) * 1e-9;
-}
-
 int main(int argc, char * argv[]) {
 	MPI_Init(&argc, &argv);
 	int comm_rank, comm_size;
-	struct timespec start, end;
 	MPI_Comm_rank(MPI_COMM_WORLD, &comm_rank);
 	MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
-	if (argc < 3) {
+	if (argc < 4) {
 		if (comm_rank == 0) {
-			printf("USAGE: %s <nx> <ny>\n", argv[0]);
+			printf("USAGE: %s <nx> <ny> <NX>\n", argv[0]);
 		}
 		MPI_Finalize();
 		return -1;
@@ -29,6 +23,13 @@ int main(int argc, char * argv[]) {
 	int ny = atoi(argv[2]);
 
 	int NX = atoi(argv[3]); // Nombre de domaines selon X (Q3.1)
+	if (NX <= 0 || comm_size % NX != 0) {
+		if (comm_rank == 0) {
+			printf("Erreur : NX doit diviser le nombre de processus\n");
+		}
+		MPI_Finalize();
+		return -1;
+	}
 	int NY = comm_size / NX; // Nombre de domaines selon Y
 
 	heat_problem pb;
@@ -45,38 +46,33 @@ int main(int argc, char * argv[]) {
 		step_parallel(&pb, dt); // Appel à la version parallèle
 		// On appelle print_mean tous les 100 itérations
 		if (i % 100 == 0){
-			print_mean(&pb, ny);
+			print_mean(&pb);
 		}
 	}
 
 	// ------------------ Rapatriement du champ global ------------------
-
-	int local_inner_ny = pb.ny - 2;
-	int local_inner_size = local_inner_ny * pb.nx;
-
 	int nx_global = pb.nx;
-	int ny_global = local_inner_ny * comm_size + 2;
+	int ny_global = pb.ny * comm_size;  // tout inclure, fantômes compris
 
 	double *T_global = NULL;
 	if (comm_rank == 0) {
 		T_global = calloc(nx_global * ny_global, sizeof(double));
 	}
 
-	MPI_Gather(&pb.T[pb.nx], local_inner_size, MPI_DOUBLE, T_global + nx_global, local_inner_size,
-		MPI_DOUBLE, 0, MPI_COMM_WORLD);
+	// On récupère tout le tableau local
+	MPI_Gather(pb.T, pb.nx * pb.ny, MPI_DOUBLE, T_global, pb.nx * pb.ny,
+			MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
 	if (comm_rank == 0) {
 		pb.T = T_global;
 		pb.ny = ny_global;
 
-		// print_result(&pb);
+		print_result(&pb, 0);
 	}
+
 	clock_gettime(CLOCK_MONOTONIC, &end);
 	printf("Temps total passé dans toutes les itérations de calcul: %f seconds\n", get_delta(start, end));
 	printf("Total time for %d iterations: %f seconds\n", niter, get_delta(start, end));
-
-
-	// print_result(&pb);
 
 	free_problem(&pb);
 	MPI_Finalize();

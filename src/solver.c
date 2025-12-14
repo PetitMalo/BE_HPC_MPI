@@ -24,22 +24,58 @@ void create_problem(int nx, int ny, double alpha, int NX, int NY, heat_problem *
     // Allocation du tableau local
     pb->T = calloc(pb->nx * pb->ny, sizeof(double));
 
-    // Conditions aux limites verticales (x=0 et x=nx-1)
-    for (int i = 0; i < pb->ny; i++) {
-        pb->T[i * pb->nx] = 1.0;                  // bord gauche
-        pb->T[i * pb->nx + (pb->nx - 1)] = 1.0;   // bord droit
-    }
+	int rank;
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	pb->ycomm_rank = rank / NX;
+	pb->ycomm_size = NY;
+	pb->xcomm_rank = rank % NX;
+	pb->xcomm_size = NX;
 
-    // Conditions aux limites horizontales (y=0 et y=ny-1)
-    for (int j = 0; j < pb->nx; j++) {
-        pb->T[j] = 0.0;                           // bord haut
-        pb->T[(pb->ny - 1) * pb->nx + j] = 0.0;   // bord bas
-    }
+    // // Conditions aux limites verticales (x=0 et x=nx-1)
+    // for (int i = 0; i < pb->ny; i++) {
+    //     pb->T[i * pb->nx] = 1.0;                  // bord gauche
+    //     pb->T[i * pb->nx + (pb->nx - 1)] = 1.0;   // bord droit
+    // }
 
-    // Création du communicateur parallèle en Y
-    pb->ycomm = MPI_COMM_WORLD;
-    MPI_Comm_rank(pb->ycomm, &pb->ycomm_rank);
-    MPI_Comm_size(pb->ycomm, &pb->ycomm_size);
+    // // Conditions aux limites horizontales (y=0 et y=ny-1)
+    // for (int j = 0; j < pb->nx; j++) {
+    //     pb->T[j] = 0.0;                           // bord haut
+    //     pb->T[(pb->ny - 1) * pb->nx + j] = 0.0;   // bord bas
+    // }
+
+	// Conditions aux limites sur le bord gauche
+	if (pb->xcomm_rank == 0) {
+		for (int i = 0; i < pb->ny; i++)
+			pb->T[i * pb->nx] = 1.0;
+	}
+
+	// Conditions aux limites sur le bord droit
+	if (pb->xcomm_rank == pb->xcomm_size - 1) {
+		for (int i = 0; i < pb->ny; i++)
+			pb->T[i * pb->nx + pb->nx - 1] = 1.0;
+	}
+
+	// Conditions aux limites sur le bord haut
+	if (pb->ycomm_rank == 0) {
+		for (int j = 0; j < pb->nx; j++)
+			pb->T[j] = 0.0;
+	}
+
+	// Conditions aux limites sur le bord bas
+	if (pb->ycomm_rank == pb->ycomm_size - 1) {
+		for (int j = 0; j < pb->nx; j++)
+			pb->T[(pb->ny - 1) * pb->nx + j] = 0.0;
+	}
+
+	// Communicateur par ligne Y
+	MPI_Comm_split(MPI_COMM_WORLD, pb->ycomm_rank, pb->xcomm_rank, &pb->ycomm);
+	MPI_Comm_rank(pb->ycomm, &pb->ycomm_rank);
+	MPI_Comm_size(pb->ycomm, &pb->ycomm_size);
+
+	// Communicateur par colonne X
+	MPI_Comm_split(MPI_COMM_WORLD, pb->xcomm_rank, pb->ycomm_rank, &pb->xcomm);
+	MPI_Comm_rank(pb->xcomm, &pb->xcomm_rank);
+	MPI_Comm_size(pb->xcomm, &pb->xcomm_size);
 
     // clock_gettime(CLOCK_MONOTONIC, &end);
     // printf("Temps passé dans create_problem: %f seconds\n", get_delta(start, end));
@@ -70,13 +106,13 @@ void step(heat_problem * pb, double dt) {
 
 
 void step_parallel(heat_problem *pb, double dt) {
-    int rank = pb->ycomm_rank;
-    int size = pb->ycomm_size;
     int nx = pb->nx;
     int ny = pb->ny;
+    int yrank = pb->ycomm_rank;
+    int size = pb->ycomm_size;
 
-    int north = (rank == 0) ? MPI_PROC_NULL : rank - 1;
-    int south = (rank == size - 1) ? MPI_PROC_NULL : rank + 1;
+    int north = (yrank == 0) ? MPI_PROC_NULL : yrank - 1;
+    int south = (yrank == size - 1) ? MPI_PROC_NULL : yrank + 1;
 
     // 1) Échange des fantômes sur T_n
     MPI_Sendrecv(&pb->T[1 * nx], nx, MPI_DOUBLE, north, 0,
@@ -86,6 +122,46 @@ void step_parallel(heat_problem *pb, double dt) {
     MPI_Sendrecv(&pb->T[(ny - 2) * nx], nx, MPI_DOUBLE, south, 1,
                  &pb->T[0], nx, MPI_DOUBLE, north, 1,
                  pb->ycomm, MPI_STATUS_IGNORE);
+
+	// Échange selon X
+	int xrank = pb->xcomm_rank;
+	int xsize = pb->xcomm_size;
+	int west  = (xrank == 0) ? MPI_PROC_NULL : xrank - 1;
+	int east  = (xrank == xsize - 1) ? MPI_PROC_NULL : xrank + 1;
+
+	// Nécessité de créer un type MPI pour envoyer/recevoir des colonnes
+	MPI_Datatype column_type;
+	MPI_Type_vector(
+		ny - 2,
+		1, 
+		nx,
+		MPI_DOUBLE,
+		&column_type
+	);
+	MPI_Type_commit(&column_type);
+
+	// Envoi vers l'ouest, réception depuis l'est
+	MPI_Sendrecv(
+		&pb->T[1 * nx + 1],           // colonne intérieure gauche
+		1, column_type,
+		west, 2,
+		&pb->T[1 * nx + (nx - 1)],    // colonne fantôme droite
+		1, column_type,
+		east, 2,
+		pb->xcomm, MPI_STATUS_IGNORE
+	);
+
+	// Envoi vers l'est, réception depuis l'ouest
+	MPI_Sendrecv(
+		&pb->T[1 * nx + (nx - 2)],    // colonne intérieure droite
+		1, column_type,
+		east, 3,
+		&pb->T[1 * nx + 0],           // colonne fantôme gauche
+		1, column_type,
+		west, 3,
+		pb->xcomm, MPI_STATUS_IGNORE
+	);
+
 
     // 2) Copie T_n
     double *oldT = malloc(nx * ny * sizeof(double));
@@ -105,24 +181,42 @@ void step_parallel(heat_problem *pb, double dt) {
 }
 
 
-void print_result(heat_problem * pb) {
+// void print_result(heat_problem * pb) {
+// 	struct timespec start, end;
+// 	clock_gettime(CLOCK_MONOTONIC, &start);
+// 	int nx = pb->nx;
+// 	int ny = pb->ny;
+// 	for (int i = 0; i < ny; i++) {
+// 		for (int j = 0; j < nx; j++) {
+// 			printf("%3.2f ", pb->T[i*nx + j]);
+// 		}
+// 		printf("\n");
+// 	}
+// 	clock_gettime(CLOCK_MONOTONIC, &end);
+// 	// printf("Temps passé dans print_result: %f seconds\n", get_delta(start, end));
+// }
+
+void print_result(heat_problem * pb, int rank) {
 	struct timespec start, end;
 	clock_gettime(CLOCK_MONOTONIC, &start);
-	int nx = pb->nx;
-	int ny = pb->ny;
-	for (int i = 0; i < ny; i++) {
-		for (int j = 0; j < nx; j++) {
-			printf("%3.2f ", pb->T[i*nx + j]);
-		}
-		printf("\n");
-	}
+    int nx = pb->nx;
+    int ny = pb->ny;
+	
+    printf("Processus %d:\n", rank);
+    for (int i = 0; i < ny; i++) {
+        for (int j = 0; j < nx; j++) {
+            printf("%6.2f ", pb->T[i*nx + j]);
+        }
+        printf("\n");
+    }
+    printf("\n");
 	clock_gettime(CLOCK_MONOTONIC, &end);
-	// printf("Temps passé dans print_result: %f seconds\n", get_delta(start, end));
 }
 
-void print_mean(heat_problem *pb, int ny_global) {
+
+void print_mean(heat_problem *pb) {
     int nx = pb->nx;
-    int ny_local = pb->ny - 2;
+    int ny = pb->ny;
 
     double *local_sum = calloc(nx, sizeof(double));
     double *global_sum = NULL;
@@ -130,32 +224,22 @@ void print_mean(heat_problem *pb, int ny_global) {
     int world_rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
-    // On s'assure que seul le rang 0 alloue le tableau global
     if (world_rank == 0) {
         global_sum = calloc(nx, sizeof(double));
     }
 
-    // Somme locale (hors fantômes)
-    for (int i = 1; i <= ny_local; i++) {
+    // Somme locale sur toutes les lignes, y compris fantômes
+    for (int i = 0; i < ny; i++) {
         for (int j = 0; j < nx; j++) {
             local_sum[j] += pb->T[i * nx + j];
         }
     }
 
-    MPI_Reduce(
-        local_sum,
-        global_sum,
-        nx,
-        MPI_DOUBLE,
-        MPI_SUM,
-        0,
-        MPI_COMM_WORLD
-    );
+    MPI_Reduce(local_sum, global_sum, nx, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
 
-    // Affichage de la moyenne par le rang 0
     if (world_rank == 0) {
         for (int j = 0; j < nx; j++) {
-            printf("%6.4f ", global_sum[j] / ny_global);
+            printf("%6.2f ", global_sum[j] / (ny * 4)); // diviser par nb total de lignes (nb processus = 4 ici)
         }
         printf("\n");
         free(global_sum);
@@ -163,4 +247,5 @@ void print_mean(heat_problem *pb, int ny_global) {
 
     free(local_sum);
 }
+
 

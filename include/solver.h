@@ -15,7 +15,10 @@ typedef struct {
 	MPI_Comm ycomm; // Communicateur pour la parallélisation selon y
 	int ycomm_rank; // Rang du processus selon y
 	int ycomm_size; // Taille du communicateur selon y
-	// On pourra ajouter un communicateur selon X en partie 3.
+	// Ci-dessous on définit un communicateur selon X pour la partie 3.
+	MPI_Comm xcomm; // Communicateur pour la parallélisation selon x
+	int xcomm_rank; // Rang du processus selon x
+	int xcomm_size; // Taille du communicateur selon x
 } heat_problem;
 
 /**
@@ -42,7 +45,7 @@ void step(heat_problem * pb, double dt);
 /**
  * Affiche le résultat du problème.
  */
-void print_result(heat_problem * pb);
+void print_result(heat_problem * pb, int rank);
 
 
 /** Retourne la différence (en secondes) entre deux timespec */
@@ -51,5 +54,5 @@ double get_delta(struct timespec begin, struct timespec end);
 /** Calcule une itération en parallèle. */
 void step_parallel(heat_problem *pb, double dt);
 
-void print_mean(heat_problem *pb, int ny_global);
+void print_mean(heat_problem *pb);
 #endif
