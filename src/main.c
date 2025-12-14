@@ -28,8 +28,8 @@ int main(int argc, char * argv[]) {
 	int nx = atoi(argv[1]);
 	int ny = atoi(argv[2]);
 
-	int NX = 1; // Nombre de domaines selon X (Q3.2)
-	int NY = comm_size;
+	int NX = atoi(argv[3]); // Nombre de domaines selon X (Q3.1)
+	int NY = comm_size / NX; // Nombre de domaines selon Y
 
 	heat_problem pb;
 	create_problem(nx, ny, 1.0, NX, NY, &pb);
