@@ -4,9 +4,15 @@
 #include <time.h>
 #include <mpi.h>
 
+/** Retourne la différence (en secondes) entre deux timespec */
+double get_delta(struct timespec begin, struct timespec end) {
+	return end.tv_sec - begin.tv_sec + (end.tv_nsec - begin.tv_nsec) * 1e-9;
+}
+
 int main(int argc, char * argv[]) {
 	MPI_Init(&argc, &argv);
 	int comm_rank, comm_size;
+	struct timespec start, end;
 	MPI_Comm_rank(MPI_COMM_WORLD, &comm_rank);
 	MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
 	if (argc < 3) {
@@ -67,6 +73,9 @@ int main(int argc, char * argv[]) {
 	}
 	clock_gettime(CLOCK_MONOTONIC, &end);
 	printf("Temps total passé dans toutes les itérations de calcul: %f seconds\n", get_delta(start, end));
+	printf("Total time for %d iterations: %f seconds\n", niter, get_delta(start, end));
+
+
 	// print_result(&pb);
 
 	free_problem(&pb);
